@@ -188,6 +188,37 @@ async def eff(key: str) -> str:
     return val if val else os.getenv(key, "")
 
 
+async def get_telephony_provider() -> str:
+    provider = (await eff("TELEPHONY_PROVIDER") or "vobiz").strip().lower()
+    return provider if provider in ("vobiz", "voicelink") else "vobiz"
+
+
+async def get_provider_setting(provider: str, setting: str, *fallbacks: str) -> str:
+    provider_keys = {
+        "vobiz": {
+            "sip_domain": "VOBIZ_SIP_DOMAIN",
+            "username": "VOBIZ_USERNAME",
+            "password": "VOBIZ_PASSWORD",
+            "outbound_number": "VOBIZ_OUTBOUND_NUMBER",
+            "trunk_id": "VOBIZ_OUTBOUND_TRUNK_ID",
+        },
+        "voicelink": {
+            "sip_domain": "VOICELINK_SIP_DOMAIN",
+            "username": "VOICELINK_SIP_USERNAME",
+            "password": "VOICELINK_SIP_PASSWORD",
+            "outbound_number": "VOICELINK_OUTBOUND_NUMBER",
+            "trunk_id": "VOICELINK_OUTBOUND_TRUNK_ID",
+        },
+    }
+    keys = [provider_keys.get(provider, {}).get(setting, ""), *fallbacks]
+    for key in keys:
+        if key:
+            value = await eff(key)
+            if value:
+                return value
+    return ""
+
+
 # -- Request models --
 
 class CallRequest(BaseModel):
@@ -630,13 +661,14 @@ async def api_setup_trunk():
     url    = await eff("LIVEKIT_URL")
     key    = await eff("LIVEKIT_API_KEY")
     secret = await eff("LIVEKIT_API_SECRET")
-    sip_domain = (await eff("VOBIZ_SIP_DOMAIN")) or (await eff("TWILIO_SIP_DOMAIN"))
-    username   = (await eff("VOBIZ_USERNAME")) or (await eff("TWILIO_SIP_USERNAME")) or (await eff("TWILIO_ACCOUNT_SID"))
-    password   = (await eff("VOBIZ_PASSWORD")) or (await eff("TWILIO_SIP_PASSWORD")) or (await eff("TWILIO_AUTH_TOKEN"))
-    phone      = (await eff("VOBIZ_OUTBOUND_NUMBER")) or (await eff("TWILIO_OUTBOUND_NUMBER"))
+    provider = await get_telephony_provider()
+    sip_domain = await get_provider_setting(provider, "sip_domain", "TWILIO_SIP_DOMAIN")
+    username = await get_provider_setting(provider, "username", "TWILIO_SIP_USERNAME", "TWILIO_ACCOUNT_SID")
+    password = await get_provider_setting(provider, "password", "TWILIO_SIP_PASSWORD", "TWILIO_AUTH_TOKEN")
+    phone = await get_provider_setting(provider, "outbound_number", "TWILIO_OUTBOUND_NUMBER")
 
     if not all([url, key, secret, sip_domain, username, password, phone]):
-        raise HTTPException(400, "Configure LiveKit and VoBiz/SIP credentials in Settings first.")
+        raise HTTPException(400, f"Configure LiveKit and {provider.title()} SIP credentials in Settings first.")
 
     try:
         from livekit import api as lk_api
@@ -648,7 +680,7 @@ async def api_setup_trunk():
         trunk = await lk.sip.create_sip_outbound_trunk(
             lk_api.CreateSIPOutboundTrunkRequest(
                 trunk=lk_api.SIPOutboundTrunkInfo(
-                    name="Vobiz Outbound Trunk",
+                    name=f"{provider.title()} Outbound Trunk",
                     address=sip_domain,
                     auth_username=username,
                     auth_password=password,
@@ -657,11 +689,14 @@ async def api_setup_trunk():
             )
         )
         trunk_id = trunk.sip_trunk_id
+        provider_trunk_key = "VOICELINK_OUTBOUND_TRUNK_ID" if provider == "voicelink" else "VOBIZ_OUTBOUND_TRUNK_ID"
+        await set_setting(provider_trunk_key, trunk_id)
+        os.environ[provider_trunk_key] = trunk_id
         await set_setting("OUTBOUND_TRUNK_ID", trunk_id)
         os.environ["OUTBOUND_TRUNK_ID"] = trunk_id
         await lk.aclose()
         await session.close()
-        return {"status": "created", "trunk_id": trunk_id}
+        return {"status": "created", "provider": provider, "trunk_id": trunk_id}
     except Exception as exc:
         raise HTTPException(500, f"Trunk creation failed: {exc}")
 

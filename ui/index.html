@@ -1263,10 +1263,88 @@
                     </form>
                 </div>
 
-                <!-- Group 3: VoBiz & SIP Telephony -->
+                <!-- Group 3: Telephony Provider & SIP -->
                 <div class="card">
-                    <div class="card-header"><h2 class="card-title"><i data-lucide="phone"></i>VoBiz & SIP Telephony</h2></div>
-                    <form onsubmit="event.preventDefault(); saveSettingsGroup(['TWILIO_SIP_DOMAIN', 'TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN', 'TWILIO_SIP_USERNAME', 'TWILIO_SIP_PASSWORD', 'TWILIO_OUTBOUND_NUMBER', 'OUTBOUND_TRUNK_ID', 'DEFAULT_TRANSFER_NUMBER'], 'set-tw-sip', 'set-tw-sid', 'set-tw-token', 'set-sip-username', 'set-sip-password', 'set-tw-phone', 'set-outbound-trunk', 'set-tw-transfer')">
+                    <div class="card-header"><h2 class="card-title"><i data-lucide="phone"></i>Telephony Provider & SIP</h2></div>
+                    <form onsubmit="event.preventDefault(); saveTelephonySettings().catch(err => alert(err.message))">
+                        <div class="form-group">
+                            <label for="set-telephony-provider">Active Telephony Provider</label>
+                            <select id="set-telephony-provider" onchange="toggleTelephonyProviderFields()">
+                                <option value="vobiz">VoBiz</option>
+                                <option value="voicelink">VoiceLink</option>
+                            </select>
+                            <small style="color:var(--text-secondary)">Calls use the selected provider's LiveKit SIP trunk.</small>
+                        </div>
+
+                        <div id="vobiz-settings-block">
+                            <h3 style="font-size: 0.95rem; margin: 1rem 0 0.75rem; color: var(--text-primary);">VoBiz SIP Settings</h3>
+                            <div class="form-group">
+                                <label for="set-vobiz-sip">VoBiz SIP Domain</label>
+                                <input type="text" id="set-vobiz-sip" placeholder="sip.vobiz.com">
+                            </div>
+                            <div class="grid-2col">
+                                <div class="form-group">
+                                    <label for="set-vobiz-username">VoBiz SIP Username</label>
+                                    <input type="text" id="set-vobiz-username" placeholder="Username">
+                                </div>
+                                <div class="form-group">
+                                    <label for="set-vobiz-password">VoBiz SIP Password</label>
+                                    <div style="position: relative;">
+                                        <input type="password" id="set-vobiz-password" placeholder="Password" style="padding-right: 2.8rem;">
+                                        <button type="button" style="position: absolute; right: 0.5rem; top: 50%; transform: translateY(-50%); background: none; border: none; color: var(--text-secondary); cursor: pointer;" onclick="togglePasswordVisibility('set-vobiz-password', this)">
+                                            <i data-lucide="eye" style="width: 18px; height: 18px;"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="grid-2col">
+                                <div class="form-group">
+                                    <label for="set-vobiz-phone">VoBiz Outbound Number</label>
+                                    <input type="text" id="set-vobiz-phone" placeholder="+91XXXXXXXXXX">
+                                </div>
+                                <div class="form-group">
+                                    <label for="set-vobiz-trunk">VoBiz Trunk ID</label>
+                                    <input type="text" id="set-vobiz-trunk" placeholder="LiveKit SIP trunk ID">
+                                </div>
+                            </div>
+                        </div>
+
+                        <div id="voicelink-settings-block" style="display:none">
+                            <h3 style="font-size: 0.95rem; margin: 1rem 0 0.75rem; color: var(--text-primary);">VoiceLink SIP Settings</h3>
+                            <div class="form-group">
+                                <label for="set-voicelink-sip">VoiceLink SIP Domain</label>
+                                <input type="text" id="set-voicelink-sip" placeholder="VoiceLink SIP domain / outbound proxy">
+                            </div>
+                            <div class="grid-2col">
+                                <div class="form-group">
+                                    <label for="set-voicelink-username">VoiceLink SIP Username</label>
+                                    <input type="text" id="set-voicelink-username" placeholder="Username from VoiceLink">
+                                </div>
+                                <div class="form-group">
+                                    <label for="set-voicelink-password">VoiceLink SIP Password</label>
+                                    <div style="position: relative;">
+                                        <input type="password" id="set-voicelink-password" placeholder="Password from VoiceLink" style="padding-right: 2.8rem;">
+                                        <button type="button" style="position: absolute; right: 0.5rem; top: 50%; transform: translateY(-50%); background: none; border: none; color: var(--text-secondary); cursor: pointer;" onclick="togglePasswordVisibility('set-voicelink-password', this)">
+                                            <i data-lucide="eye" style="width: 18px; height: 18px;"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="grid-2col">
+                                <div class="form-group">
+                                    <label for="set-voicelink-phone">VoiceLink Outbound Number</label>
+                                    <input type="text" id="set-voicelink-phone" placeholder="VoiceLink outbound caller number">
+                                </div>
+                                <div class="form-group">
+                                    <label for="set-voicelink-trunk">VoiceLink Trunk ID</label>
+                                    <input type="text" id="set-voicelink-trunk" placeholder="Auto-filled after trunk creation">
+                                </div>
+                            </div>
+                        </div>
+
+                        <details style="margin-top: 1rem;">
+                            <summary style="cursor:pointer; color:var(--text-secondary); font-size:0.9rem;">Legacy Twilio / Custom SIP fallback fields</summary>
+                            <div style="margin-top: 0.75rem;">
                         <div class="form-group">
                             <label for="set-tw-sip">SIP Termination URI / Domain</label>
                             <input type="text" id="set-tw-sip" placeholder="sip.vobiz.com or your-trunk.pstn.twilio.com">
@@ -1315,9 +1393,11 @@
                                 <input type="text" id="set-outbound-trunk" placeholder="Livekit Trunk ID">
                             </div>
                         </div>
+                            </div>
+                        </details>
                         <div style="display: flex; gap: 0.5rem; margin-top: 1rem;">
                             <button type="submit" class="btn btn-primary" style="flex: 1">
-                                <i data-lucide="save"></i> Save SIP Settings
+                                <i data-lucide="save"></i> Save Telephony Settings
                             </button>
                             <button type="button" class="btn btn-secondary" onclick="setupSIPTrunk()">
                                 <i data-lucide="zap"></i> Create LiveKit SIP Trunk
@@ -2572,6 +2652,17 @@
                     "set-gemini-key": "GOOGLE_API_KEY",
                     "set-gemini-model": "GEMINI_MODEL",
                     "set-gemini-voice": "GEMINI_TTS_VOICE",
+                    "set-telephony-provider": "TELEPHONY_PROVIDER",
+                    "set-vobiz-sip": "VOBIZ_SIP_DOMAIN",
+                    "set-vobiz-username": "VOBIZ_USERNAME",
+                    "set-vobiz-password": "VOBIZ_PASSWORD",
+                    "set-vobiz-phone": "VOBIZ_OUTBOUND_NUMBER",
+                    "set-vobiz-trunk": "VOBIZ_OUTBOUND_TRUNK_ID",
+                    "set-voicelink-sip": "VOICELINK_SIP_DOMAIN",
+                    "set-voicelink-username": "VOICELINK_SIP_USERNAME",
+                    "set-voicelink-password": "VOICELINK_SIP_PASSWORD",
+                    "set-voicelink-phone": "VOICELINK_OUTBOUND_NUMBER",
+                    "set-voicelink-trunk": "VOICELINK_OUTBOUND_TRUNK_ID",
                     "set-tw-sip": "TWILIO_SIP_DOMAIN",
                     "set-tw-sid": "TWILIO_ACCOUNT_SID",
                     "set-tw-token": "TWILIO_AUTH_TOKEN",
@@ -2605,6 +2696,11 @@
                     }
                 }
 
+                if (document.getElementById("set-telephony-provider") && !document.getElementById("set-telephony-provider").value) {
+                    document.getElementById("set-telephony-provider").value = "vobiz";
+                }
+                toggleTelephonyProviderFields();
+
                 if (config["ENABLED_TOOLS"] && config["ENABLED_TOOLS"].value) {
                     let tools = [];
                     try {
@@ -2617,6 +2713,15 @@
             } catch (err) {
                 console.error(err);
             }
+        }
+
+        function toggleTelephonyProviderFields() {
+            const providerEl = document.getElementById("set-telephony-provider");
+            const provider = providerEl ? providerEl.value : "vobiz";
+            const vobizBlock = document.getElementById("vobiz-settings-block");
+            const voiceLinkBlock = document.getElementById("voicelink-settings-block");
+            if (vobizBlock) vobizBlock.style.display = provider === "vobiz" ? "block" : "none";
+            if (voiceLinkBlock) voiceLinkBlock.style.display = provider === "voicelink" ? "block" : "none";
         }
 
         function togglePasswordVisibility(inputId, btnEl) {
@@ -2659,6 +2764,39 @@
             } catch (err) {
                 alert(err.message);
             }
+        }
+
+        async function saveTelephonySettings(silent = false) {
+            const keys = [
+                'TELEPHONY_PROVIDER',
+                'VOBIZ_SIP_DOMAIN', 'VOBIZ_USERNAME', 'VOBIZ_PASSWORD', 'VOBIZ_OUTBOUND_NUMBER', 'VOBIZ_OUTBOUND_TRUNK_ID',
+                'VOICELINK_SIP_DOMAIN', 'VOICELINK_SIP_USERNAME', 'VOICELINK_SIP_PASSWORD', 'VOICELINK_OUTBOUND_NUMBER', 'VOICELINK_OUTBOUND_TRUNK_ID',
+                'TWILIO_SIP_DOMAIN', 'TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN', 'TWILIO_SIP_USERNAME', 'TWILIO_SIP_PASSWORD', 'TWILIO_OUTBOUND_NUMBER', 'OUTBOUND_TRUNK_ID', 'DEFAULT_TRANSFER_NUMBER'
+            ];
+            const inputIds = [
+                'set-telephony-provider',
+                'set-vobiz-sip', 'set-vobiz-username', 'set-vobiz-password', 'set-vobiz-phone', 'set-vobiz-trunk',
+                'set-voicelink-sip', 'set-voicelink-username', 'set-voicelink-password', 'set-voicelink-phone', 'set-voicelink-trunk',
+                'set-tw-sip', 'set-tw-sid', 'set-tw-token', 'set-sip-username', 'set-sip-password', 'set-tw-phone', 'set-outbound-trunk', 'set-tw-transfer'
+            ];
+            const settings = {};
+            keys.forEach((key, idx) => {
+                const inputEl = document.getElementById(inputIds[idx]);
+                if (inputEl) settings[key] = inputEl.value.trim();
+            });
+
+            const res = await fetch("/api/settings", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ settings })
+            });
+            if (!res.ok) {
+                const data = await res.json();
+                throw new Error(data.detail || "Update failed");
+            }
+            if (!silent) alert("Telephony settings updated successfully!");
+            loadLiveConfig();
+            loadSettingsForm();
         }
 
         async function loadUsers() {
@@ -2825,14 +2963,19 @@
 
         async function setupSIPTrunk() {
             const statusDiv = document.getElementById("trunk-creation-status");
-            statusDiv.textContent = "Connecting to LiveKit to create SIP Outbound Trunk...";
+            const providerEl = document.getElementById("set-telephony-provider");
+            const provider = providerEl ? providerEl.value : "selected provider";
+            statusDiv.textContent = `Saving settings and creating ${provider} LiveKit SIP Outbound Trunk...`;
 
             try {
+                await saveTelephonySettings(true);
+                statusDiv.textContent = `Connecting to LiveKit to create ${provider} SIP Outbound Trunk...`;
                 const res = await fetch("/api/setup/trunk", { method: "POST" });
                 const data = await res.json();
                 if (res.ok) {
-                    statusDiv.innerHTML = `<span style="color:var(--accent-green)">Success! Created Trunk ID: <strong>${data.trunk_id}</strong>. OUTBOUND_TRUNK_ID has been auto-saved.</span>`;
+                    statusDiv.innerHTML = `<span style="color:var(--accent-green)">Success! Created ${data.provider || provider} Trunk ID: <strong>${data.trunk_id}</strong>. The active trunk has been auto-saved.</span>`;
                     loadLiveConfig();
+                    loadSettingsForm();
                 } else {
                     throw new Error(data.detail || "Trunk initialization failed");
                 }

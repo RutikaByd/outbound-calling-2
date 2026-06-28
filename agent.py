@@ -25,7 +25,7 @@ except ImportError:
     _HAS_ROOM_OPTIONS = False
 from livekit.plugins import noise_cancellation, silero
 
-from db import init_db, log_error, get_enabled_tools
+from db import init_db, log_error, get_enabled_tools, get_setting
 from prompts import build_prompt
 from tools import AppointmentTools
 
@@ -35,7 +35,32 @@ load_dotenv(".env")
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("outbound-agent")
 
-SIP_DOMAIN = os.getenv("TWILIO_SIP_DOMAIN", "")
+async def _eff(key: str) -> str:
+    try:
+        value = await get_setting(key, "")
+        if value:
+            return value
+    except Exception:
+        pass
+    return os.getenv(key, "")
+
+
+async def _telephony_provider() -> str:
+    provider = (await _eff("TELEPHONY_PROVIDER") or "vobiz").strip().lower()
+    return provider if provider in ("vobiz", "voicelink") else "vobiz"
+
+
+async def _selected_trunk_id() -> tuple[str, str]:
+    provider = await _telephony_provider()
+    if provider == "voicelink":
+        return provider, (await _eff("VOICELINK_OUTBOUND_TRUNK_ID")) or (await _eff("OUTBOUND_TRUNK_ID"))
+    return provider, (await _eff("VOBIZ_OUTBOUND_TRUNK_ID")) or (await _eff("OUTBOUND_TRUNK_ID"))
+
+
+async def _selected_sip_domain(provider: str) -> str:
+    if provider == "voicelink":
+        return (await _eff("VOICELINK_SIP_DOMAIN")) or (await _eff("TWILIO_SIP_DOMAIN"))
+    return (await _eff("VOBIZ_SIP_DOMAIN")) or (await _eff("TWILIO_SIP_DOMAIN"))
 
 
 async def _log(level: str, msg: str, detail: str = "") -> None:
@@ -204,7 +229,9 @@ async def entrypoint(ctx: agents.JobContext) -> None:
 
     system_prompt = build_prompt(lead_name=lead_name, business_name=business_name,
                                   service_type=service_type, custom_prompt=custom_prompt)
-    tool_ctx = AppointmentTools(ctx, phone_number, lead_name)
+    provider = await _telephony_provider()
+    sip_domain = await _selected_sip_domain(provider)
+    tool_ctx = AppointmentTools(ctx, phone_number, lead_name, sip_domain=sip_domain)
 
     if voice_override:
         os.environ["GEMINI_TTS_VOICE"] = voice_override
@@ -225,12 +252,12 @@ async def entrypoint(ctx: agents.JobContext) -> None:
 
     # ── Dial — MUST come before session.start() ──────────────────────────────
     if phone_number:
-        trunk_id = os.getenv("OUTBOUND_TRUNK_ID")
+        provider, trunk_id = await _selected_trunk_id()
         if not trunk_id:
-            await _log("error", "OUTBOUND_TRUNK_ID not set — cannot place outbound call")
+            await _log("error", f"Outbound trunk ID not set for {provider} — cannot place outbound call")
             ctx.shutdown()
             return
-        await _log("info", f"Dialing {phone_number} via SIP trunk {trunk_id}")
+        await _log("info", f"Dialing {phone_number} via {provider} SIP trunk {trunk_id}")
         try:
             await ctx.api.sip.create_sip_participant(
                 api.CreateSIPParticipantRequest(

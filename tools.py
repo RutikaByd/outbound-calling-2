@@ -26,12 +26,12 @@ async def _log(msg: str, detail: str = "", level: str = "info") -> None:
 class AppointmentTools(llm.ToolContext):
     """All function tools available to the appointment-booking agent."""
 
-    def __init__(self, ctx: agents.JobContext, phone_number: Optional[str] = None, lead_name: Optional[str] = None):
+    def __init__(self, ctx: agents.JobContext, phone_number: Optional[str] = None, lead_name: Optional[str] = None, sip_domain: str = ""):
         self.ctx = ctx
         self.phone_number = phone_number
         self.lead_name = lead_name
         self._call_start_time = time.time()
-        self._sip_domain = os.getenv("TWILIO_SIP_DOMAIN", "")
+        self._sip_domain = sip_domain or os.getenv("TWILIO_SIP_DOMAIN", "")
         self.recording_url: Optional[str] = None
         self.call_logged = False
         self.call_log_id: Optional[str] = None
