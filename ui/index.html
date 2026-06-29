@@ -822,9 +822,7 @@
                     </div>
                 </div>
             </div>
-        </section>
-
-        <!-- 🚀 CAMPAIGNS PANEL -->
+        </s        <!-- 🚀 CAMPAIGNS PANEL -->
         <section id="panel-campaigns" class="tab-panel">
             <div class="grid-2col">
                 <!-- Create Campaign -->
@@ -872,32 +870,53 @@
                             <textarea id="camp-custom-prompt" rows="4" placeholder="e.g. Pitch the discount offer..."></textarea>
                         </div>
                         <button type="submit" class="btn btn-primary" style="width: 100%">
-                            <i data-lucide="plus"></i> Save & Queue Campaign
+                            <i data-lucide="plus"></i> Save &amp; Queue Campaign
                         </button>
                     </form>
                 </div>
 
-                <!-- Campaigns Table -->
+                <!-- Active Campaigns -->
                 <div class="card">
-                    <div class="card-header"><h2 class="card-title"><i data-lucide="list"></i>Active Campaign Lists</h2></div>
+                    <div class="card-header"><h2 class="card-title"><i data-lucide="radio"></i>Active Campaigns</h2></div>
                     <div class="table-responsive">
-                        <table id="table-campaigns">
-                            <thead>
-                                <tr>
-                                    <th>Campaign Name</th>
-                                    <th>Trigger</th>
-                                    <th>Dispatched</th>
-                                    <th>Status</th>
-                                    <th>Actions</th>
-                                </tr>
-                            </thead>
+                        <table id="table-campaigns-active">
+                            <thead><tr>
+                                <th>Campaign Name</th>
+                                <th>Trigger</th>
+                                <th>Dispatched</th>
+                                <th>Status</th>
+                                <th>Actions</th>
+                            </tr></thead>
                             <tbody>
-                                <tr>
-                                    <td colspan="5" style="text-align:center; color:var(--text-secondary)">No campaigns scheduled</td>
-                                </tr>
+                                <tr><td colspan="5" style="text-align:center;color:var(--text-secondary)">No active campaigns</td></tr>
                             </tbody>
                         </table>
                     </div>
+                </div>
+            </div>
+
+            <!-- Campaign History (always visible, full width) -->
+            <div class="card" style="margin-top:1.5rem">
+                <div class="card-header" style="display:flex;align-items:center;justify-content:space-between">
+                    <h2 class="card-title"><i data-lucide="history"></i>Campaign History</h2>
+                    <span id="camp-history-count" style="font-size:0.8rem;color:var(--text-secondary)"></span>
+                </div>
+                <div class="table-responsive">
+                    <table id="table-campaigns-history">
+                        <thead><tr>
+                            <th>Campaign Name</th>
+                            <th>Trigger</th>
+                            <th>Leads</th>
+                            <th>Dispatched</th>
+                            <th>Failed</th>
+                            <th>Last Run</th>
+                            <th>Status</th>
+                            <th>Actions</th>
+                        </tr></thead>
+                        <tbody>
+                            <tr><td colspan="8" style="text-align:center;color:var(--text-secondary)">No campaign history yet</td></tr>
+                        </tbody>
+                    </table>
                 </div>
             </div>
         </section>
@@ -2104,39 +2123,73 @@
             try {
                 const res = await fetch("/api/campaigns");
                 const campaigns = await res.json();
-                const tbody = document.querySelector("#table-campaigns tbody");
-                tbody.innerHTML = "";
 
-                if (campaigns.length === 0) {
-                    tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; color:var(--text-secondary)">No campaigns scheduled</td></tr>`;
-                    return;
+                // ── Active table (top-right card) ───────────────────────────
+                const activeTbody = document.querySelector("#table-campaigns-active tbody");
+                const active = campaigns.filter(c => c.status === 'active' || c.status === 'paused');
+                activeTbody.innerHTML = "";
+                if (active.length === 0) {
+                    activeTbody.innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--text-secondary)">No active campaigns</td></tr>`;
+                } else {
+                    active.forEach(c => {
+                        const tr = document.createElement("tr");
+                        const schedStr = c.schedule_type === "once" ? "Once" : `${c.schedule_type} @ ${c.schedule_time}`;
+                        const badge = c.status === 'active'
+                            ? `<span class="badge badge-green">Active</span>`
+                            : `<span class="badge badge-orange">Paused</span>`;
+                        tr.innerHTML = `
+                            <td><strong>${c.name}</strong></td>
+                            <td>${schedStr}</td>
+                            <td>${c.total_dispatched || 0} ok / ${c.total_failed || 0} fail</td>
+                            <td>${badge}</td>
+                            <td>
+                                <button class="btn btn-secondary" style="padding:0.3rem 0.6rem" onclick="dispatchCampaignNow('${c.id}')" title="Run now"><i data-lucide="play" style="width:14px"></i></button>
+                                <button class="btn btn-secondary" style="padding:0.3rem 0.6rem" onclick="toggleCampaignStatus('${c.id}','${c.status}')" title="Pause/Resume"><i data-lucide="${c.status==='active'?'pause':'play'}" style="width:14px"></i></button>
+                                <button class="btn btn-secondary" style="padding:0.3rem 0.6rem" onclick="downloadCampaignCSV('${c.id}')" title="Download CSV"><i data-lucide="file-down" style="width:14px"></i></button>
+                                <button class="btn btn-danger" style="padding:0.3rem 0.6rem" onclick="deleteCampaign('${c.id}')" title="Delete"><i data-lucide="trash-2" style="width:14px"></i></button>
+                            </td>`;
+                        activeTbody.appendChild(tr);
+                    });
                 }
 
-                campaigns.forEach(c => {
-                    const tr = document.createElement("tr");
-                    const schedStr = c.schedule_type === "once" ? "Once (Immediate)" : `${c.schedule_type} @ ${c.schedule_time}`;
-                    const disp = c.total_dispatched || 0;
-                    const fail = c.total_failed || 0;
-                    const activeBadge = c.status === "active" ? `<span class="badge badge-green">Active</span>` : c.status === "paused" ? `<span class="badge badge-orange">Paused</span>` : `<span class="badge badge-blue">Completed</span>`;
+                // ── History table (full-width card, always shows ALL) ────────
+                const histTbody = document.querySelector("#table-campaigns-history tbody");
+                histTbody.innerHTML = "";
+                if (campaigns.length === 0) {
+                    histTbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:var(--text-secondary)">No campaign history yet</td></tr>`;
+                } else {
+                    document.getElementById('camp-history-count').textContent = `${campaigns.length} total`;
+                    campaigns.forEach(c => {
+                        const tr = document.createElement("tr");
+                        const schedStr = c.schedule_type === "once" ? "Once (Immediate)" : `${c.schedule_type} @ ${c.schedule_time}`;
+                        const disp = c.total_dispatched || 0;
+                        const fail = c.total_failed || 0;
+                        const contacts = (() => { try { return JSON.parse(c.contacts_json || '[]').length; } catch(e){ return '?'; } })();
+                        const lastRun = c.last_run_at ? new Date(c.last_run_at).toLocaleString() : (c.created_at ? new Date(c.created_at).toLocaleString() : '—');
+                        const badge =
+                            c.status === 'active'    ? `<span class="badge badge-green">Active</span>` :
+                            c.status === 'paused'    ? `<span class="badge badge-orange">Paused</span>` :
+                                                       `<span class="badge badge-blue">Completed</span>`;
+                        tr.innerHTML = `
+                            <td><strong>${c.name}</strong></td>
+                            <td>${schedStr}</td>
+                            <td>${contacts}</td>
+                            <td style="color:var(--success)">${disp}</td>
+                            <td style="color:var(--danger)">${fail}</td>
+                            <td style="font-size:0.82rem">${lastRun}</td>
+                            <td>${badge}</td>
+                            <td>
+                                <button class="btn btn-secondary" style="padding:0.3rem 0.6rem" onclick="dispatchCampaignNow('${c.id}')" title="Re-run now"><i data-lucide="play" style="width:14px"></i></button>
+                                <button class="btn btn-secondary" style="padding:0.3rem 0.6rem" onclick="downloadCampaignCSV('${c.id}')" title="Download results CSV"><i data-lucide="file-down" style="width:14px"></i></button>
+                                <button class="btn btn-danger" style="padding:0.3rem 0.6rem" onclick="deleteCampaign('${c.id}')" title="Delete"><i data-lucide="trash-2" style="width:14px"></i></button>
+                            </td>`;
+                        histTbody.appendChild(tr);
+                    });
+                }
 
-                    const isCompleted = c.status === 'completed';
-                    tr.innerHTML = `
-                        <td><strong>${c.name}</strong></td>
-                        <td>${schedStr}</td>
-                        <td>${disp} ok / ${fail} failed</td>
-                        <td>${activeBadge}</td>
-                        <td>
-                            <button class="btn btn-secondary" style="padding:0.3rem 0.6rem" onclick="dispatchCampaignNow('${c.id}')" title="Run now"><i data-lucide="play" style="width:14px"></i></button>
-                            <button class="btn btn-secondary" style="padding:0.3rem 0.6rem" onclick="toggleCampaignStatus('${c.id}', '${c.status}')" title="Pause/Resume"><i data-lucide="${c.status === 'active' ? 'pause' : 'check'}" style="width:14px"></i></button>
-                            <button class="btn btn-secondary" style="padding:0.3rem 0.6rem" onclick="downloadCampaignCSV('${c.id}')" title="Download CSV"><i data-lucide="file-down" style="width:14px"></i></button>
-                            <button class="btn btn-danger" style="padding:0.3rem 0.6rem" onclick="deleteCampaign('${c.id}')" title="Delete"><i data-lucide="trash-2" style="width:14px"></i></button>
-                        </td>
-                    `;
-                    tbody.appendChild(tr);
-                });
                 lucide.createIcons();
             } catch (err) {
-                console.error(err);
+                console.error('loadCampaigns error:', err);
             }
         }
 

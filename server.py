@@ -920,23 +920,47 @@ async def _run_campaign(campaign_id: str) -> None:
 
 
 async def _build_campaign_csv(campaign_id: str) -> str:
-    """Build a CSV string of campaign contacts with their call statuses."""
+    """Build a CSV string of campaign contacts enriched with real call outcomes from call_logs."""
     import csv, io
     campaign = await get_campaign(campaign_id)
     if not campaign:
         return "No campaign found"
     contacts = json.loads(campaign.get("contacts_json") or "[]")
 
+    # Build a phone→latest call_log lookup in one pass
+    from db import get_calls_by_phone
+    call_cache: dict = {}
+    for c in contacts:
+        phone = c.get("phone", "")
+        if phone and phone not in call_cache:
+            logs = await get_calls_by_phone(phone)
+            call_cache[phone] = logs[0] if logs else {}
+
     out = io.StringIO()
     writer = csv.writer(out)
-    writer.writerow(["phone", "lead_name", "business_name", "service_type", "dispatch_status"])
+    writer.writerow([
+        "phone", "lead_name", "business_name", "service_type",
+        "dispatch_status",
+        "call_outcome", "call_answered", "call_duration_seconds",
+        "call_timestamp", "call_notes", "recording_url",
+    ])
     for c in contacts:
+        phone = c.get("phone", "")
+        log = call_cache.get(phone, {})
+        outcome = log.get("outcome", "")
+        answered = "Yes" if outcome and outcome not in ("no_answer", "failed", "") else ("No" if log else "")
         writer.writerow([
-            c.get("phone", ""),
+            phone,
             c.get("lead_name", c.get("name", "")),
             c.get("business_name", ""),
             c.get("service_type", ""),
             c.get("_status", "dispatched"),
+            outcome,
+            answered,
+            log.get("duration_seconds", ""),
+            log.get("timestamp", ""),
+            log.get("notes", ""),
+            log.get("recording_url", ""),
         ])
     return out.getvalue()
 
