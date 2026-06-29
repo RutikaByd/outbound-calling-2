@@ -538,9 +538,9 @@ async def api_dispatch_call(req: CallRequest):
     room_name = f"call-{phone.replace('+', '')}-{random.randint(1000, 9999)}"
     metadata: dict = {
         "phone_number": phone,
-        "lead_name": req.lead_name,
-        "business_name": req.business_name,
-        "service_type": req.service_type,
+        "lead_name":     (req.lead_name     or "").strip() or "there",
+        "business_name": (req.business_name or "").strip() or "our company",
+        "service_type":  (req.service_type  or "").strip() or "our service",
         "system_prompt": effective_prompt,
     }
     if effective_voice:  metadata["voice_override"] = effective_voice

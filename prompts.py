@@ -71,13 +71,23 @@ def build_prompt(
     service_type: str = "our service",
     custom_prompt: str = None,
 ) -> str:
-    """Interpolate lead/business details into the prompt template."""
+    """
+    Interpolate lead/business details into the prompt template.
+
+    Uses explicit str.replace() instead of str.format() to avoid KeyError
+    when custom prompts contain unrecognised {placeholders} — which caused
+    the agent to literally say '{lead_name}' out loud.
+    """
+    # Ensure sane defaults if empty strings slip through
+    lead_name     = (lead_name     or "").strip() or "there"
+    business_name = (business_name or "").strip() or "our company"
+    service_type  = (service_type  or "").strip() or "our service"
+
     template = custom_prompt if custom_prompt else DEFAULT_SYSTEM_PROMPT
-    try:
-        return template.format(
-            lead_name=lead_name,
-            business_name=business_name,
-            service_type=service_type,
-        )
-    except KeyError:
-        return template
+
+    return (
+        template
+        .replace("{lead_name}",     lead_name)
+        .replace("{business_name}", business_name)
+        .replace("{service_type}",  service_type)
+    )

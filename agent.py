@@ -192,21 +192,26 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     if ctx.job.metadata:
         try:
             data = json.loads(ctx.job.metadata)
-            phone_number   = data.get("phone_number")
-            lead_name      = data.get("lead_name", lead_name)
-            business_name  = data.get("business_name", business_name)
-            service_type   = data.get("service_type", service_type)
-            custom_prompt  = data.get("system_prompt")
-            voice_override = data.get("voice_override")
-            model_override = data.get("model_override")
-            tools_override = data.get("tools_override")
-        except (json.JSONDecodeError, AttributeError):
-            await _log("warning", "Invalid JSON in job metadata")
+            await _log("info", f"Raw metadata received: {data}")
+            phone_number = data.get("phone_number")
+            # IMPORTANT: dict.get(key, default) only uses default when key is ABSENT.
+            # If the value is an empty string "", .get() returns "", NOT the default.
+            # We must strip and check for truthiness explicitly.
+            lead_name      = (data.get("lead_name")     or "").strip() or "there"
+            business_name  = (data.get("business_name") or "").strip() or "our company"
+            service_type   = (data.get("service_type")  or "").strip() or "our service"
+            custom_prompt  = data.get("system_prompt") or None
+            voice_override = data.get("voice_override") or None
+            model_override = data.get("model_override") or None
+            tools_override = data.get("tools_override") or None
+        except (json.JSONDecodeError, AttributeError) as meta_err:
+            await _log("warning", f"Invalid JSON in job metadata: {meta_err}")
 
-    await _log("info", f"Call job received — phone={phone_number} lead={lead_name} biz={business_name}")
+    await _log("info", f"Resolved call params — phone={phone_number} lead_name='{lead_name}' business='{business_name}' service='{service_type}'")
 
     system_prompt = build_prompt(lead_name=lead_name, business_name=business_name,
                                   service_type=service_type, custom_prompt=custom_prompt)
+    await _log("info", f"System prompt first 200 chars: {system_prompt[:200]}")
     tool_ctx = AppointmentTools(ctx, phone_number, lead_name)
 
     # NOTE: Do NOT mutate os.environ here — concurrent calls would corrupt each other's
