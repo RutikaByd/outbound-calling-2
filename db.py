@@ -5,6 +5,7 @@ Loads from Supabase client if URL and service key are present.
 
 import json
 import os
+import time
 import uuid
 from datetime import datetime, timedelta
 from typing import Optional
@@ -76,6 +77,35 @@ def init_db() -> None:
         print("   Run supabase_schema.sql in your Supabase Dashboard -> SQL Editor")
 
 
+# ── Settings cache (60s TTL) ────────────────────────────────────────────────
+# Avoids a Supabase round-trip for every concurrent call (ENABLED_TOOLS, model, etc.)
+_settings_cache: dict = {}          # key -> value
+_settings_cache_ts: float = 0.0     # epoch seconds of last full load
+_SETTINGS_TTL: float = 60.0         # seconds
+
+
+def _settings_cache_valid() -> bool:
+    return (time.monotonic() - _settings_cache_ts) < _SETTINGS_TTL
+
+
+def _invalidate_settings_cache() -> None:
+    global _settings_cache, _settings_cache_ts
+    _settings_cache = {}
+    _settings_cache_ts = 0.0
+
+
+async def _warm_settings_cache() -> None:
+    """Load all settings into the in-process cache in one DB round-trip."""
+    global _settings_cache, _settings_cache_ts
+    try:
+        db = await _adb()
+        result = await db.table("settings").select("key, value").execute()
+        _settings_cache = {row["key"]: row["value"] for row in (result.data or []) if row.get("key")}
+        _settings_cache_ts = time.monotonic()
+    except Exception:
+        pass  # non-fatal; fall through to individual lookup
+
+
 # ── Settings ─────────────────────────────────────────────────────────────────
 
 async def get_all_settings() -> dict:
@@ -120,13 +150,15 @@ async def save_settings(data: dict) -> None:
     ]
     if rows:
         await db.table("settings").upsert(rows, on_conflict="key").execute()
+        _invalidate_settings_cache()  # force next read to re-query DB
 
 
 async def get_setting(key: str, default: str = "") -> str:
-    db = await _adb()
-    result = await db.table("settings").select("value").eq("key", key).maybe_single().execute()
-    if result and result.data:
-        return result.data["value"]
+    # Serve from cache if fresh; otherwise warm the cache first (one round-trip for all keys)
+    if not _settings_cache_valid():
+        await _warm_settings_cache()
+    if key in _settings_cache:
+        return _settings_cache[key]
     return _default(key) or default
 
 
@@ -136,6 +168,7 @@ async def set_setting(key: str, value: str) -> None:
         {"key": key, "value": value, "updated_at": datetime.now().isoformat()},
         on_conflict="key",
     ).execute()
+    _invalidate_settings_cache()  # force next read to re-query DB
 
 
 async def get_enabled_tools() -> list:

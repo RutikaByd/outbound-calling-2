@@ -2231,16 +2231,42 @@
         // ── RECORDING / S3 HELPERS ────────────────────────────────────────────────────
 
         function _extractS3Key(url) {
-            // Given a full S3/CDN URL, extract just the object key after the bucket root.
-            // e.g. https://bucket.s3.amazonaws.com/recordings/call-xxx.ogg -> recordings/call-xxx.ogg
+            // Extract the S3 object key from any URL format.
+            // Handles 3 cases:
+            //   1. Virtual-hosted: https://<bucket>.s3.<region>.amazonaws.com/<key>
+            //      -> pathname is already just /<key>, strip leading /
+            //   2. Path-style:     https://s3.<region>.amazonaws.com/<bucket>/<key>
+            //      or custom endpoint: https://endpoint/<bucket>/<key>
+            //      -> pathname is /<bucket>/<key>, must strip leading /<bucket>
+            //   3. s3://bucket/key URI -> just return 'key' path
             try {
+                if (url.startsWith('s3://')) {
+                    // s3://bucket/recordings/call.ogg -> recordings/call.ogg
+                    const withoutScheme = url.slice(5);  // remove s3://
+                    const slashIdx = withoutScheme.indexOf('/');
+                    return slashIdx >= 0 ? withoutScheme.slice(slashIdx + 1) : withoutScheme;
+                }
                 const u = new URL(url);
-                // pathname starts with '/', strip it
-                return u.pathname.replace(/^\//, '');
+                const hostname = u.hostname;
+                let path = u.pathname.replace(/^\//, '');  // strip leading /
+
+                // If hostname is <bucket>.s3.*amazonaws.com or <bucket>.storage.googleapis.com
+                // the path is already the key (virtual-hosted style).
+                const isVirtualHosted = /^[^.]+\.(s3[.-]|storage\.googleapis)/.test(hostname);
+                if (isVirtualHosted) return path;
+
+                // Path-style: first segment of the path is the bucket name — strip it.
+                // e.g. s3.ap-south-1.amazonaws.com/call-recordings/recordings/call.ogg
+                //   -> path = "call-recordings/recordings/call.ogg"
+                //   -> strip "call-recordings/" -> "recordings/call.ogg"
+                const firstSlash = path.indexOf('/');
+                if (firstSlash > 0) return path.slice(firstSlash + 1);
+                return path;
             } catch (e) {
                 return url; // fallback: use raw value as the key
             }
         }
+
 
         async function _fetchPresignedUrl(s3Key) {
             const res = await fetch(`/api/recordings/presign?key=${encodeURIComponent(s3Key)}`);
