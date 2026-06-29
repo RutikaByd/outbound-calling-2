@@ -1862,28 +1862,29 @@
 
             const reader = new FileReader();
             reader.onload = function(e) {
-                const text = e.target.result;
-                const lines = text.split("\n");
-                const headers = lines[0].split(",").map(h => h.trim().toLowerCase());
+                const text = e.target.result.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+                const lines = text.split('\n').filter(l => l.trim());
 
                 batchLeads = [];
                 const tbody = document.querySelector("#table-batch-preview tbody");
                 tbody.innerHTML = "";
 
+                if (lines.length < 2) return;
+                const headers = _parseCSVLine(lines[0]).map(h => h.toLowerCase().replace(/["']/g, '').trim());
+
                 for (let i = 1; i < lines.length; i++) {
                     if (!lines[i].trim()) continue;
-                    const cols = lines[i].split(",").map(c => c.trim());
-                    const lead = {};
-                    headers.forEach((h, idx) => {
-                        lead[h] = cols[idx] || "";
-                    });
+                    const cols = _parseCSVLine(lines[i]);
+                    const raw = {};
+                    headers.forEach((h, idx) => { raw[h] = (cols[idx] || '').trim(); });
 
-                    if (lead.phone) {
-                        batchLeads.push(lead);
-                        const tr = document.createElement("tr");
-                        tr.innerHTML = `<td>${lead.phone}</td><td>${lead.lead_name || lead.name || 'there'}</td><td>${lead.service_type || lead.service || 'Appointment'}</td>`;
-                        tbody.appendChild(tr);
-                    }
+                    const lead = _normalizeLead(raw);
+                    if (!lead.phone) continue;
+
+                    batchLeads.push(lead);
+                    const tr = document.createElement("tr");
+                    tr.innerHTML = `<td>${lead.phone}</td><td>${lead.lead_name}</td><td>${lead.service_type}</td>`;
+                    tbody.appendChild(tr);
                 }
 
                 document.getElementById("batch-stats-summary").style.display = "block";
@@ -1921,9 +1922,9 @@
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({
                             phone: lead.phone,
-                            lead_name: lead.lead_name || lead.name || "there",
-                            business_name: lead.business_name || lead.business || "our company",
-                            service_type: lead.service_type || lead.service || "our service",
+                            lead_name: lead.lead_name,
+                            business_name: lead.business_name,
+                            service_type: lead.service_type,
                             agent_profile_id: agentProfileId || null
                         })
                     });
@@ -1953,26 +1954,93 @@
 
         let campaignLeads = [];
 
+        function _parseCSVLine(line) {
+            // Handles quoted fields containing commas or newlines
+            const result = [];
+            let cur = '';
+            let inQuotes = false;
+            for (let i = 0; i < line.length; i++) {
+                const ch = line[i];
+                if (ch === '"') {
+                    if (inQuotes && line[i+1] === '"') { cur += '"'; i++; } // escaped quote
+                    else inQuotes = !inQuotes;
+                } else if (ch === ',' && !inQuotes) {
+                    result.push(cur.trim());
+                    cur = '';
+                } else {
+                    cur += ch;
+                }
+            }
+            result.push(cur.trim());
+            return result;
+        }
+
+        function _normalizeLead(lead) {
+            // Normalize all common CSV column name variants into canonical keys.
+            // Handles: Name, name, lead_name, Lead Name, lead name, Full Name, etc.
+            const nameVariants   = ['lead_name', 'name', 'full name', 'fullname', 'contact name', 'customer name', 'lead name'];
+            const phoneVariants  = ['phone', 'phone number', 'mobile', 'cell', 'contact', 'number', 'phone_number'];
+            const bizVariants    = ['business_name', 'business', 'company', 'company name', 'organization'];
+            const svcVariants    = ['service_type', 'service', 'product', 'interest', 'service type'];
+
+            const pick = (variants) => {
+                for (const v of variants) {
+                    if (lead[v] && lead[v].toString().trim()) return lead[v].toString().trim();
+                }
+                return '';
+            };
+
+            return {
+                phone:         pick(phoneVariants),
+                lead_name:     pick(nameVariants) || 'there',
+                business_name: pick(bizVariants)  || 'our company',
+                service_type:  pick(svcVariants)  || 'our service',
+                _raw: lead,
+            };
+        }
+
         function parseCampaignCSV(input) {
             const file = input.files[0];
             if (!file) return;
 
             const reader = new FileReader();
             reader.onload = function(e) {
-                const text = e.target.result;
-                const lines = text.split("\n");
-                const headers = lines[0].split(",").map(h => h.trim().toLowerCase());
+                // Normalize line endings — Windows CSVs use \r\n
+                const text = e.target.result.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+                const lines = text.split('\n').filter(l => l.trim());
+                if (lines.length < 2) {
+                    alert('CSV must have a header row and at least one data row.');
+                    return;
+                }
+
+                // Parse header
+                const headers = _parseCSVLine(lines[0]).map(h => h.toLowerCase().replace(/["']/g, '').trim());
 
                 campaignLeads = [];
+                const tbody = document.querySelector('#camp-preview-table tbody');
+                if (tbody) tbody.innerHTML = '';
+
                 for (let i = 1; i < lines.length; i++) {
                     if (!lines[i].trim()) continue;
-                    const cols = lines[i].split(",").map(c => c.trim());
-                    const lead = {};
-                    headers.forEach((h, idx) => {
-                        lead[h] = cols[idx] || "";
-                    });
-                    if (lead.phone) campaignLeads.push(lead);
+                    const cols = _parseCSVLine(lines[i]);
+                    const raw = {};
+                    headers.forEach((h, idx) => { raw[h] = (cols[idx] || '').trim(); });
+
+                    const lead = _normalizeLead(raw);
+                    if (!lead.phone) continue; // skip rows with no phone
+
+                    campaignLeads.push(lead);
+
+                    if (tbody) {
+                        const tr = document.createElement('tr');
+                        tr.innerHTML = `<td>${lead.phone}</td><td>${lead.lead_name}</td><td>${lead.service_type}</td>`;
+                        tbody.appendChild(tr);
+                    }
                 }
+
+                document.getElementById('camp-lead-count').textContent = campaignLeads.length;
+                const countEl = document.getElementById('camp-parsed-count');
+                if (countEl) countEl.textContent = campaignLeads.length;
             };
             reader.readAsText(file);
         }

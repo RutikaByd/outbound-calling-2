@@ -814,11 +814,29 @@ async def _dispatch_one(lk, lk_api, contact: dict, room_name: str,
                          prompt: Optional[str], profile: Optional[dict] = None) -> bool:
     try:
         saved_prompt = prompt or (await get_setting("system_prompt", "")) or None
+        # Resolve lead name — support multiple CSV column name variants
+        resolved_name = (
+            contact.get("lead_name") or contact.get("name") or
+            contact.get("full name") or contact.get("fullname") or
+            contact.get("contact name") or contact.get("customer name") or
+            "there"
+        ).strip() or "there"
+        resolved_biz = (
+            contact.get("business_name") or contact.get("business") or
+            contact.get("company") or contact.get("organization") or
+            "our company"
+        ).strip() or "our company"
+        resolved_svc = (
+            contact.get("service_type") or contact.get("service") or
+            contact.get("product") or contact.get("interest") or
+            "our service"
+        ).strip() or "our service"
+
         metadata: dict = {
             "phone_number": contact["phone"],
-            "lead_name": contact.get("lead_name", "there"),
-            "business_name": contact.get("business_name", "our company"),
-            "service_type": contact.get("service_type", "our service"),
+            "lead_name": resolved_name,
+            "business_name": resolved_biz,
+            "service_type": resolved_svc,
             "system_prompt": saved_prompt,
         }
         if profile:
