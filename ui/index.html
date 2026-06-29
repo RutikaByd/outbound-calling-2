@@ -1372,17 +1372,19 @@
                                 <small style="color:var(--text-secondary);font-size:0.75rem;">The outbound SIP trunk ID in LiveKit that points to VoiceLink (160.30.71.89)</small>
                             </div>
                             <div class="form-group">
-                                <label for="set-vl-did">VoiceLink DID Number (Caller ID)</label>
+                                <label for="set-vl-did">VoiceLink DID Number (Reference)</label>
                                 <input type="text" id="set-vl-did" placeholder="+919484959462">
-                                <small style="color:var(--text-secondary);font-size:0.75rem;">Your VoiceLink DID shown to recipients. E.164 format: +91XXXXXXXXXX</small>
+                                <small style="color:var(--text-secondary);font-size:0.75rem;">For reference only — caller ID is determined by the DID registered in your LiveKit SIP trunk</small>
                             </div>
                         </div>
 
                         <div style="background:var(--bg-tertiary);border-radius:8px;padding:0.75rem 1rem;margin:0.5rem 0 1rem;border-left:3px solid var(--accent-blue);font-size:0.8rem;color:var(--text-secondary)">
                             <strong style="color:var(--accent-blue)">How it works:</strong> VoiceLink requires a <code>45454</code> tech-prefix prepended to the destination number via the LiveKit SIP trunk.
-                            This is handled automatically — just provide your Trunk ID and DID above.
+                            This is handled automatically when VoiceLink is enabled — just fill in your Trunk ID above and save.
                             <br><br>
                             <strong>Your trunk info:</strong> SIP Server <code>160.30.71.89:3300</code> · Transport UDP · Tech Prefix <code>45454</code>
+                            <br><br>
+                            <strong style="color:var(--text-primary)">⚡ Live switching:</strong> Toggling this setting takes effect within 60 seconds — no server restart needed.
                         </div>
 
                         <button type="submit" class="btn btn-primary" style="width:100%">

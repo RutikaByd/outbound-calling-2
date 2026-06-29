@@ -25,7 +25,7 @@ except ImportError:
     _HAS_ROOM_OPTIONS = False
 from livekit.plugins import noise_cancellation, silero
 
-from db import init_db, log_error, get_enabled_tools
+from db import init_db, log_error, get_enabled_tools, get_setting
 from prompts import build_prompt
 from tools import AppointmentTools
 
@@ -232,29 +232,35 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     # ── Dial — MUST come before session.start() ──────────────────────────────
     if phone_number:
         # ── Provider selection: VoiceLink or Vobiz ───────────────────────────
-        voicelink_enabled = (os.getenv("VOICELINK_ENABLED", "false").lower() in ("true", "1", "yes"))
-        voicelink_trunk   = os.getenv("VOICELINK_TRUNK_ID", "")
-        vobiz_trunk       = os.getenv("OUTBOUND_TRUNK_ID", "")
+        # IMPORTANT: Read from DB (60s TTL cache) NOT from os.environ snapshot.
+        # This means toggling VoiceLink in the UI takes effect within 60s,
+        # no agent restart required.
+        voicelink_enabled_str = await get_setting("VOICELINK_ENABLED", "") or os.getenv("VOICELINK_ENABLED", "false")
+        voicelink_enabled = voicelink_enabled_str.lower() in ("true", "1", "yes")
+        voicelink_trunk   = await get_setting("VOICELINK_TRUNK_ID", "") or os.getenv("VOICELINK_TRUNK_ID", "")
+        vobiz_trunk       = await get_setting("OUTBOUND_TRUNK_ID", "") or os.getenv("OUTBOUND_TRUNK_ID", "")
 
-        if voicelink_enabled and voicelink_trunk:
+        if voicelink_enabled:
+            if not voicelink_trunk:
+                await _log("error", "VOICELINK is enabled but VOICELINK_TRUNK_ID is not set — check Settings > VoiceLink Telephony")
+                ctx.shutdown()
+                return
             trunk_id = voicelink_trunk
             provider = "VoiceLink"
-            # VoiceLink + LiveKit requires: tech-prefix (45454) + national digits, NO leading +
-            # E.g. +919028697049 → 45454919028697049
+            # VoiceLink + LiveKit requires: tech-prefix 45454 + country-code digits, NO leading +
+            # E.g. +919028697049 → strip + → 919028697049 → 45454919028697049
             digits = phone_number.lstrip("+")
             sip_call_to = f"45454{digits}"
         else:
+            if not vobiz_trunk:
+                await _log("error", "OUTBOUND_TRUNK_ID not set — cannot place outbound call via Vobiz")
+                ctx.shutdown()
+                return
             trunk_id = vobiz_trunk
             provider = "Vobiz"
             sip_call_to = phone_number  # Vobiz expects standard E.164 with +
 
-        if not trunk_id:
-            setting_hint = "VOICELINK_TRUNK_ID" if voicelink_enabled else "OUTBOUND_TRUNK_ID"
-            await _log("error", f"{setting_hint} not set — cannot place outbound call")
-            ctx.shutdown()
-            return
-
-        await _log("info", f"Dialing {phone_number} via {provider} SIP trunk {trunk_id} (sip_call_to={sip_call_to})")
+        await _log("info", f"Dialing {phone_number} via {provider} trunk={trunk_id} sip_call_to={sip_call_to}")
         try:
             await ctx.api.sip.create_sip_participant(
                 api.CreateSIPParticipantRequest(
