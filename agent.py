@@ -101,7 +101,9 @@ except ImportError:
 
 # ── Session factory ──────────────────────────────────────────────────────────
 
-def _build_session(tools: list, system_prompt: str) -> AgentSession:
+def _build_session(tools: list, system_prompt: str,
+                   voice_override: Optional[str] = None,
+                   model_override: Optional[str] = None) -> AgentSession:
     """
     Build AgentSession with Gemini Live or pipeline fallback.
 
@@ -112,8 +114,9 @@ def _build_session(tools: list, system_prompt: str) -> AgentSession:
 
     ⚠️ EndSensitivity MUST use full string form: END_SENSITIVITY_LOW (not .LOW — AttributeError!)
     """
-    gemini_model = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-live-preview")
-    gemini_voice = os.getenv("GEMINI_TTS_VOICE", "Aoede")
+    # Use per-call overrides first, then fall back to env/settings
+    gemini_model = model_override or os.getenv("GEMINI_MODEL", "gemini-3.1-flash-live-preview")
+    gemini_voice = voice_override or os.getenv("GEMINI_TTS_VOICE", "Aoede")
     use_realtime = os.getenv("USE_GEMINI_REALTIME", "true").lower() != "false"
 
     RealtimeClass = _google_realtime or (_google_beta_realtime if use_realtime else None)
@@ -206,10 +209,8 @@ async def entrypoint(ctx: agents.JobContext) -> None:
                                   service_type=service_type, custom_prompt=custom_prompt)
     tool_ctx = AppointmentTools(ctx, phone_number, lead_name)
 
-    if voice_override:
-        os.environ["GEMINI_TTS_VOICE"] = voice_override
-    if model_override:
-        os.environ["GEMINI_MODEL"] = model_override
+    # NOTE: Do NOT mutate os.environ here — concurrent calls would corrupt each other's
+    # model/voice settings. Instead, pass overrides directly to _build_session().
 
     if tools_override:
         try:
@@ -248,11 +249,14 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         await _log("info", f"Call ANSWERED — {phone_number} picked up, starting AI session now")
 
     # ── Build and start Gemini Live ──────────────────────────────────────────
-    gemini_model = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-live-preview")
-    await _log("info", f"Building AI session — model={gemini_model}")
+    # Resolve the active model/voice for logging (respects per-call overrides)
+    active_model = model_override or os.getenv("GEMINI_MODEL", "gemini-3.1-flash-live-preview")
+    active_voice = voice_override or os.getenv("GEMINI_TTS_VOICE", "Aoede")
+    await _log("info", f"Building AI session — model={active_model} voice={active_voice}")
     active_tools = tool_ctx.build_tool_list(enabled_tools)
     await _log("info", f"Tools loaded: {[t.__name__ for t in active_tools]}")
-    session = _build_session(tools=active_tools, system_prompt=system_prompt)
+    session = _build_session(tools=active_tools, system_prompt=system_prompt,
+                             voice_override=voice_override, model_override=model_override)
 
     # Use RoomOptions if available (non-deprecated), else fall back
     # NEVER use close_on_disconnect=True with SIP — drops on any audio blip
@@ -302,8 +306,7 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     # ── Greeting ─────────────────────────────────────────────────────────────
     # gemini-3.1 and gemini-2.5 native-audio speak autonomously from system prompt.
     # generate_reply() is blocked by the plugin for these models — skip it entirely.
-    _active_model = os.getenv("GEMINI_MODEL", "")
-    if "3.1" in _active_model:
+    if "3.1" in active_model or "2.5" in active_model:
         await _log("info", "Gemini native-audio: model will greet autonomously from system prompt")
     else:
         greeting = (
@@ -351,7 +354,17 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     try:
         import time
         from db import get_setting, log_call, update_call_insights
-        import google.generativeai as genai
+        try:
+            import google.generativeai as genai
+            _genai_available = True
+        except ImportError:
+            try:
+                # Newer SDK: google-genai package
+                import google.genai as genai
+                _genai_available = True
+            except ImportError:
+                _genai_available = False
+                await _log("warning", "google-generativeai not installed. Run: pip install google-generativeai")
         
         enable_analysis = await get_setting("ENABLE_AI_POST_PROCESSING", "true")
         if str(enable_analysis).lower() in ("true", "1", "yes"):
@@ -388,10 +401,11 @@ async def entrypoint(ctx: agents.JobContext) -> None:
             
             if transcript_text.strip():
                 gemini_key = os.getenv("GOOGLE_API_KEY")
-                if gemini_key:
+                if gemini_key and _genai_available:
                     genai.configure(api_key=gemini_key)
-                    model_name = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
-                    if "live" in model_name or "preview" in model_name:
+                    # Never use a live/preview/streaming model for text analysis
+                    model_name = active_model
+                    if any(x in model_name for x in ("live", "preview", "flash-live")):
                         model_name = "gemini-1.5-flash"
                     
                     model = genai.GenerativeModel(model_name)

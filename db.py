@@ -3,6 +3,7 @@ db.py — Supabase database module.
 Loads from Supabase client if URL and service key are present.
 """
 
+import json
 import os
 import uuid
 from datetime import datetime, timedelta
@@ -524,3 +525,40 @@ async def set_default_agent_profile(profile_id: str) -> None:
     db = await _adb()
     await db.table("agent_profiles").update({"is_default": 0}).neq("id", "placeholder").execute()
     await db.table("agent_profiles").update({"is_default": 1}).eq("id", profile_id).execute()
+
+
+# ── Campaign Lead Status Tracking ─────────────────────────────────────────────
+# Lead statuses are embedded in campaign contacts_json as a "_status" field.
+# These helpers persist individual lead dispatch outcomes to the campaigns table.
+
+async def update_campaign_lead_status(campaign_id: str, phone: str, status: str) -> None:
+    """Mark a single lead's dispatch status inside the campaign's contacts_json."""
+    db = await _adb()
+    result = await db.table("campaigns").select("contacts_json").eq("id", campaign_id).maybe_single().execute()
+    if not result or not result.data:
+        return
+    contacts = json.loads(result.data.get("contacts_json") or "[]")
+    for c in contacts:
+        if c.get("phone") == phone:
+            c["_status"] = status
+            break
+    await db.table("campaigns").update(
+        {"contacts_json": json.dumps(contacts)}
+    ).eq("id", campaign_id).execute()
+
+
+async def get_campaign_lead_statuses(campaign_id: str) -> list:
+    """Return list of {phone, lead_name, _status} for every contact in a campaign."""
+    db = await _adb()
+    result = await db.table("campaigns").select("contacts_json").eq("id", campaign_id).maybe_single().execute()
+    if not result or not result.data:
+        return []
+    contacts = json.loads(result.data.get("contacts_json") or "[]")
+    return [
+        {
+            "phone": c.get("phone", ""),
+            "lead_name": c.get("lead_name", c.get("name", "")),
+            "_status": c.get("_status", "pending"),
+        }
+        for c in contacts
+    ]

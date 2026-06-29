@@ -37,6 +37,7 @@ from db import (
     delete_agent_profile, set_default_agent_profile, get_calls_by_phone, get_campaign,
     get_contacts, get_errors, get_logs, get_setting, get_stats, init_db, log_error,
     save_settings, set_setting, update_call_notes, update_campaign_run_stats, update_campaign_status,
+    update_campaign_lead_status, get_campaign_lead_statuses,
 )
 from prompts import DEFAULT_SYSTEM_PROMPT
 
@@ -181,6 +182,24 @@ async def _startup():
 async def _shutdown():
     if _scheduler and _scheduler.running:
         _scheduler.shutdown(wait=False)
+
+
+# ── Shared LiveKit helper ─────────────────────────────────────────────────────
+
+_lk_ssl_ctx = ssl.create_default_context()
+_lk_ssl_ctx.check_hostname = False
+_lk_ssl_ctx.verify_mode = ssl.CERT_NONE
+
+
+async def _get_lk_api():
+    """Create a LiveKit API client with an owned aiohttp session."""
+    from livekit import api as lk_api_module
+    url = await eff("LIVEKIT_URL")
+    key = await eff("LIVEKIT_API_KEY")
+    secret = await eff("LIVEKIT_API_SECRET")
+    session = aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=_lk_ssl_ctx))
+    lk = lk_api_module.LiveKitAPI(url=url, api_key=key, api_secret=secret, session=session)
+    return lk, session
 
 
 async def eff(key: str) -> str:
@@ -529,12 +548,8 @@ async def api_dispatch_call(req: CallRequest):
     if effective_tools:  metadata["tools_override"] = effective_tools
 
     try:
+        lk, lk_session = await _get_lk_api()
         from livekit import api as lk_api
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
-        session = aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=ctx))
-        lk = lk_api.LiveKitAPI(url=url, api_key=key, api_secret=secret, session=session)
         await lk.room.create_room(lk_api.CreateRoomRequest(name=room_name, empty_timeout=300, max_participants=5))
         await lk.agent_dispatch.create_dispatch(
             lk_api.CreateAgentDispatchRequest(
@@ -542,7 +557,7 @@ async def api_dispatch_call(req: CallRequest):
             )
         )
         await lk.aclose()
-        await session.close()
+        await lk_session.close()
         await log_error("server", f"Call dispatched to {phone}", f"room={room_name}", "info")
         return {"status": "dispatched", "room": room_name, "phone": phone}
     except Exception as exc:
@@ -563,6 +578,49 @@ async def api_update_notes(call_id: str, req: NotesRequest):
     if not ok:
         raise HTTPException(404, "Call not found")
     return {"status": "updated"}
+
+
+# -- Recordings (S3 Pre-signed URL) --
+
+@app.get("/api/recordings/presign")
+async def api_presign_recording(key: str = Query(..., description="S3 object key, e.g. recordings/call-xxx.ogg")):
+    """
+    Generate a short-lived pre-signed URL for a private S3 recording.
+    The 'key' query param should be the S3 object key (path inside the bucket).
+    """
+    aws_access = await eff("S3_ACCESS_KEY_ID") or await eff("AWS_ACCESS_KEY_ID")
+    aws_secret = await eff("S3_SECRET_ACCESS_KEY") or await eff("AWS_SECRET_ACCESS_KEY")
+    bucket     = await eff("S3_BUCKET") or await eff("AWS_BUCKET_NAME")
+    region     = await eff("S3_REGION") or await eff("AWS_REGION") or "ap-northeast-1"
+    endpoint   = await eff("S3_ENDPOINT_URL") or await eff("S3_ENDPOINT") or None
+
+    if not all([aws_access, aws_secret, bucket]):
+        raise HTTPException(400, "S3 credentials not configured in Settings.")
+
+    try:
+        import boto3
+        from botocore.client import Config
+        kwargs: dict = dict(
+            aws_access_key_id=aws_access,
+            aws_secret_access_key=aws_secret,
+            region_name=region,
+            config=Config(signature_version="s3v4"),
+        )
+        if endpoint:
+            kwargs["endpoint_url"] = endpoint
+        s3_client = boto3.client("s3", **kwargs)
+        presigned = await asyncio.to_thread(
+            s3_client.generate_presigned_url,
+            "get_object",
+            Params={"Bucket": bucket, "Key": key},
+            ExpiresIn=3600,  # 1 hour
+        )
+        return {"url": presigned}
+    except ImportError:
+        raise HTTPException(500, "boto3 not installed. Run: pip install boto3")
+    except Exception as exc:
+        logger.error("Pre-sign failed: %s", exc)
+        raise HTTPException(500, f"Could not generate pre-signed URL: {exc}")
 
 
 # -- Stats --
@@ -843,6 +901,28 @@ async def _run_campaign(campaign_id: str) -> None:
     logger.info("Campaign %s done - %d dispatched, %d failed", campaign_id, ok_count, fail_count)
 
 
+async def _build_campaign_csv(campaign_id: str) -> str:
+    """Build a CSV string of campaign contacts with their call statuses."""
+    import csv, io
+    campaign = await get_campaign(campaign_id)
+    if not campaign:
+        return "No campaign found"
+    contacts = json.loads(campaign.get("contacts_json") or "[]")
+
+    out = io.StringIO()
+    writer = csv.writer(out)
+    writer.writerow(["phone", "lead_name", "business_name", "service_type", "dispatch_status"])
+    for c in contacts:
+        writer.writerow([
+            c.get("phone", ""),
+            c.get("lead_name", c.get("name", "")),
+            c.get("business_name", ""),
+            c.get("service_type", ""),
+            c.get("_status", "dispatched"),
+        ])
+    return out.getvalue()
+
+
 async def _reschedule_all_campaigns() -> None:
     if not _scheduler:
         return
@@ -940,3 +1020,19 @@ async def api_update_campaign_status(campaign_id: str, req: StatusRequest):
         if campaign and campaign.get("schedule_type") in ("daily", "weekdays"):
             _schedule_campaign(campaign_id, campaign["schedule_type"], campaign.get("schedule_time", "09:00"))
     return {"status": req.status}
+
+
+@app.get("/api/campaigns/{campaign_id}/export")
+async def api_export_campaign_csv(campaign_id: str):
+    """Download a CSV of all contacts in the campaign with their dispatch status."""
+    campaign = await get_campaign(campaign_id)
+    if not campaign:
+        raise HTTPException(404, "Campaign not found")
+    csv_content = await _build_campaign_csv(campaign_id)
+    from fastapi.responses import StreamingResponse
+    import io
+    return StreamingResponse(
+        io.StringIO(csv_content),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="campaign-{campaign_id[:8]}.csv"'}
+    )

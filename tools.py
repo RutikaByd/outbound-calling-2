@@ -82,8 +82,16 @@ class AppointmentTools(llm.ToolContext):
     async def end_call(self, outcome: str, reason: str = "") -> str:
         """
         End the call and log the outcome. ALWAYS call this before the call ends.
-        outcome: 'booked' | 'not_interested' | 'wrong_number' | 'voicemail' | 'no_answer' | 'callback_requested'
-        reason: brief description
+        outcome must be one of:
+          'booked'              - Appointment successfully booked
+          'callback_requested'  - Lead asked to be called back later
+          'not_interested'      - Lead is not interested
+          'wrong_number'        - Reached the wrong person or wrong number
+          'whatsapp_requested'  - Lead wants contact via WhatsApp instead
+          'voicemail'           - Call went to voicemail
+          'no_answer'           - Nobody picked up
+          'neutral'             - Call ended without clear outcome
+        reason: brief description of what happened
         """
         duration = int(time.time() - self._call_start_time)
         try:
@@ -210,12 +218,19 @@ class AppointmentTools(llm.ToolContext):
             memories = await get_contact_memory(self.phone_number)
             if len(memories) < 5:
                 return
-            import google.generativeai as genai
+            try:
+                import google.generativeai as genai
+            except ImportError:
+                try:
+                    import google.genai as genai
+                except ImportError:
+                    logger.warning("google-generativeai not installed, skipping memory compression")
+                    return
             api_key = os.getenv("GOOGLE_API_KEY", "")
             if not api_key:
                 return
             genai.configure(api_key=api_key)
-            model = genai.GenerativeModel("gemini-2.0-flash")
+            model = genai.GenerativeModel("gemini-1.5-flash")
             bullet_list = "\n".join(f"- {m['insight']}" for m in memories)
             prompt = f"Compress these notes about a sales contact into 3-5 concise bullets. Keep all key facts.\n\n{bullet_list}"
             loop = asyncio.get_event_loop()

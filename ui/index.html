@@ -2051,15 +2051,17 @@
                     const fail = c.total_failed || 0;
                     const activeBadge = c.status === "active" ? `<span class="badge badge-green">Active</span>` : c.status === "paused" ? `<span class="badge badge-orange">Paused</span>` : `<span class="badge badge-blue">Completed</span>`;
 
+                    const isCompleted = c.status === 'completed';
                     tr.innerHTML = `
                         <td><strong>${c.name}</strong></td>
                         <td>${schedStr}</td>
                         <td>${disp} ok / ${fail} failed</td>
                         <td>${activeBadge}</td>
                         <td>
-                            <button class="btn btn-secondary" style="padding:0.3rem 0.6rem" onclick="dispatchCampaignNow('${c.id}')"><i data-lucide="play" style="width:14px"></i></button>
-                            <button class="btn btn-secondary" style="padding:0.3rem 0.6rem" onclick="toggleCampaignStatus('${c.id}', '${c.status}')"><i data-lucide="${c.status === 'active' ? 'pause' : 'check'}" style="width:14px"></i></button>
-                            <button class="btn btn-danger" style="padding:0.3rem 0.6rem" onclick="deleteCampaign('${c.id}')"><i data-lucide="trash-2" style="width:14px"></i></button>
+                            <button class="btn btn-secondary" style="padding:0.3rem 0.6rem" onclick="dispatchCampaignNow('${c.id}')" title="Run now"><i data-lucide="play" style="width:14px"></i></button>
+                            <button class="btn btn-secondary" style="padding:0.3rem 0.6rem" onclick="toggleCampaignStatus('${c.id}', '${c.status}')" title="Pause/Resume"><i data-lucide="${c.status === 'active' ? 'pause' : 'check'}" style="width:14px"></i></button>
+                            <button class="btn btn-secondary" style="padding:0.3rem 0.6rem" onclick="downloadCampaignCSV('${c.id}')" title="Download CSV"><i data-lucide="file-down" style="width:14px"></i></button>
+                            <button class="btn btn-danger" style="padding:0.3rem 0.6rem" onclick="deleteCampaign('${c.id}')" title="Delete"><i data-lucide="trash-2" style="width:14px"></i></button>
                         </td>
                     `;
                     tbody.appendChild(tr);
@@ -2102,6 +2104,84 @@
                 loadCampaigns();
             } catch (err) {
                 alert(err.message);
+            }
+        }
+
+        // ── RECORDING / S3 HELPERS ────────────────────────────────────────────────────
+
+        function _extractS3Key(url) {
+            // Given a full S3/CDN URL, extract just the object key after the bucket root.
+            // e.g. https://bucket.s3.amazonaws.com/recordings/call-xxx.ogg -> recordings/call-xxx.ogg
+            try {
+                const u = new URL(url);
+                // pathname starts with '/', strip it
+                return u.pathname.replace(/^\//, '');
+            } catch (e) {
+                return url; // fallback: use raw value as the key
+            }
+        }
+
+        async function _fetchPresignedUrl(s3Key) {
+            const res = await fetch(`/api/recordings/presign?key=${encodeURIComponent(s3Key)}`);
+            if (!res.ok) {
+                const d = await res.json();
+                throw new Error(d.detail || 'Failed to generate recording URL');
+            }
+            const d = await res.json();
+            return d.url;
+        }
+
+        async function loadPresignedAudio(audioId, s3Key) {
+            try {
+                const url = await _fetchPresignedUrl(s3Key);
+                const el = document.getElementById(audioId);
+                if (!el) return;
+                el.src = url;
+                el.load();
+                el.play();
+            } catch (e) {
+                alert('Could not load recording: ' + e.message);
+            }
+        }
+
+        async function downloadPresigned(s3Key) {
+            try {
+                const url = await _fetchPresignedUrl(s3Key);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = s3Key.split('/').pop() || 'recording.ogg';
+                a.click();
+            } catch (e) {
+                alert('Could not download recording: ' + e.message);
+            }
+        }
+
+        // ── OUTCOME BADGE HELPER ─────────────────────────────────────────────────────
+
+        function _outcomeBadge(outcome) {
+            const map = {
+                booked: 'badge-green',
+                interested: 'badge-green',
+                callback_requested: 'badge-blue',
+                callback: 'badge-blue',
+                whatsapp_requested: 'badge-blue',
+                not_interested: 'badge-red',
+                wrong_number: 'badge-red',
+                voicemail: 'badge-orange',
+                no_answer: 'badge-orange',
+                neutral: 'badge-orange',
+            };
+            return map[(outcome || '').toLowerCase()] || 'badge-orange';
+        }
+
+        async function downloadCampaignCSV(id) {
+            try {
+                const a = document.createElement('a');
+                a.href = `/api/campaigns/${id}/export`;
+                a.download = `campaign-${id.slice(0,8)}.csv`;
+                a.click();
+            } catch (e) {
+                alert(e.message);
             }
         }
 
@@ -2365,11 +2445,15 @@
                 logs.forEach(l => {
                     const tr = document.createElement("tr");
                     const ts = l.timestamp ? l.timestamp.replace("T", " ").slice(0, 16) : "";
-                    const badge = l.outcome === 'booked' ? 'badge-green' : l.outcome === 'not_interested' ? 'badge-red' : 'badge-orange';
-                    const rec = l.recording_url ? `
+                    const badge = _outcomeBadge(l.outcome);
+                    const recKey = l.recording_url ? _extractS3Key(l.recording_url) : null;
+                    const rec = recKey ? `
                         <div class="audio-wrapper">
-                            <audio src="${l.recording_url}" controls></audio>
-                            <a href="${l.recording_url}" target="_blank" title="Download"><i data-lucide="download" style="width:14px"></i></a>
+                            <audio id="audio-${l.id}" controls>
+                                <source src="" type="audio/ogg">
+                            </audio>
+                            <a href="#" title="Load &amp; Play" onclick="loadPresignedAudio('audio-${l.id}','${recKey}'); return false;"><i data-lucide="play-circle" style="width:14px"></i></a>
+                            <a href="#" title="Download" onclick="downloadPresigned('${recKey}'); return false;"><i data-lucide="download" style="width:14px"></i></a>
                         </div>
                     ` : `<span style="color:var(--text-secondary); font-size:0.8rem">No audio</span>`;
 
@@ -2386,7 +2470,7 @@
                         notesText = notesMatch ? notesMatch[1] : "";
                     }
 
-                    const intBadge = interestLvlText === 'interested' || interestLvlText === 'booked' ? 'badge-green' : interestLvlText === 'not_interested' ? 'badge-red' : interestLvlText === 'callback' ? 'badge-blue' : 'badge-orange';
+                    const intBadge = _outcomeBadge(interestLvlText);
 
                     tr.innerHTML = `
                         <td>${ts}</td>
@@ -2451,7 +2535,7 @@
                 data.forEach(c => {
                     const tr = document.createElement("tr");
                     const ts = c.last_call ? c.last_call.replace("T", " ").slice(0, 16) : "";
-                    const badge = c.last_outcome === 'booked' ? 'badge-green' : c.last_outcome === 'not_interested' ? 'badge-red' : 'badge-orange';
+                    const badge = _outcomeBadge(c.last_outcome);
 
                     tr.innerHTML = `
                         <td><strong>${c.phone_number}</strong></td>
@@ -2494,7 +2578,7 @@
                         const li = document.createElement("li");
                         li.style.borderBottom = "1px solid #1a1a2e";
                         li.style.padding = "0.4rem 0";
-                        const badge = cl.outcome === 'booked' ? 'badge-green' : cl.outcome === 'not_interested' ? 'badge-red' : 'badge-orange';
+                        const badge = _outcomeBadge(cl.outcome);
                         
                         let summaryText = cl.summary || "";
                         let notesText = cl.notes || "";
@@ -2509,7 +2593,7 @@
                             notesText = notesMatch ? notesMatch[1] : "";
                         }
 
-                        const intBadge = interestLvlText === 'interested' || interestLvlText === 'booked' ? 'badge-green' : interestLvlText === 'not_interested' ? 'badge-red' : interestLvlText === 'callback' ? 'badge-blue' : 'badge-orange';
+                        const intBadge = _outcomeBadge(interestLvlText);
                         const intSpan = interestLvlText ? `<span class="badge ${intBadge}" style="margin-left:4px">Interest: ${interestLvlText}</span>` : '';
 
                         li.innerHTML = `
