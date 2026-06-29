@@ -920,49 +920,93 @@ async def _run_campaign(campaign_id: str) -> None:
 
 
 async def _build_campaign_csv(campaign_id: str) -> str:
-    """Build a CSV string of campaign contacts enriched with real call outcomes from call_logs."""
+    """Build a CSV of campaign contacts enriched with real call outcomes from call_logs."""
     import csv, io
     campaign = await get_campaign(campaign_id)
     if not campaign:
         return "No campaign found"
     contacts = json.loads(campaign.get("contacts_json") or "[]")
 
-    # Build a phone→latest call_log lookup in one pass
+    # Outcomes where a human DID pick up and speak with the agent
+    ANSWERED_OUTCOMES = {"booked", "not_interested", "wrong_number",
+                         "callback_requested", "whatsapp_requested", "neutral"}
+    # Outcomes where the call was placed but nobody answered
+    NOT_ANSWERED_OUTCOMES = {"no_answer", "voicemail", "failed"}
+
     from db import get_calls_by_phone
+
+    async def _lookup(phone: str) -> dict:
+        # Try exact phone, then with/without '+' prefix
+        for candidate in [phone, ("+" + phone) if not phone.startswith("+") else phone[1:]]:
+            logs = await get_calls_by_phone(candidate)
+            if logs:
+                return logs[0]
+        return {}
+
     call_cache: dict = {}
     for c in contacts:
-        phone = c.get("phone", "")
+        phone = (c.get("phone") or "").strip()
         if phone and phone not in call_cache:
-            logs = await get_calls_by_phone(phone)
-            call_cache[phone] = logs[0] if logs else {}
+            call_cache[phone] = await _lookup(phone)
 
     out = io.StringIO()
     writer = csv.writer(out)
     writer.writerow([
         "phone", "lead_name", "business_name", "service_type",
-        "dispatch_status",
-        "call_outcome", "call_answered", "call_duration_seconds",
-        "call_timestamp", "call_notes", "recording_url",
+        "dispatch_status", "call_answered",
+        "call_outcome", "call_duration", "call_timestamp",
+        "call_summary", "call_notes", "recording_url",
     ])
+
     for c in contacts:
-        phone = c.get("phone", "")
-        log = call_cache.get(phone, {})
-        outcome = log.get("outcome", "")
-        answered = "Yes" if outcome and outcome not in ("no_answer", "failed", "") else ("No" if log else "")
+        phone   = (c.get("phone") or "").strip()
+        log     = call_cache.get(phone, {})
+        outcome = (log.get("outcome") or "").strip()
+
+        if not log:
+            dispatch_status = "pending"
+            answered        = ""
+        elif outcome in ANSWERED_OUTCOMES:
+            dispatch_status = "completed"
+            answered        = "Yes"
+        elif outcome in NOT_ANSWERED_OUTCOMES:
+            dispatch_status = "completed"
+            answered        = "No"
+        else:
+            dispatch_status = "dispatched"
+            answered        = "Unknown"
+
+        # Human-readable timestamp
+        ts_raw = log.get("timestamp", "")
+        try:
+            from datetime import datetime as _dt
+            ts = _dt.fromisoformat(ts_raw).strftime("%Y-%m-%d %H:%M:%S") if ts_raw else ""
+        except Exception:
+            ts = ts_raw
+
+        # Human-readable duration
+        dur_secs = log.get("duration_seconds", "")
+        if isinstance(dur_secs, (int, float)) and dur_secs:
+            dur_fmt = f"{int(dur_secs)//60}m {int(dur_secs)%60}s"
+        else:
+            dur_fmt = ""
+
         writer.writerow([
             phone,
             c.get("lead_name", c.get("name", "")),
             c.get("business_name", ""),
             c.get("service_type", ""),
-            c.get("_status", "dispatched"),
-            outcome,
+            dispatch_status,
             answered,
-            log.get("duration_seconds", ""),
-            log.get("timestamp", ""),
+            outcome,
+            dur_fmt,
+            ts,
+            log.get("summary", ""),
             log.get("notes", ""),
             log.get("recording_url", ""),
         ])
     return out.getvalue()
+
 
 
 async def _reschedule_all_campaigns() -> None:
