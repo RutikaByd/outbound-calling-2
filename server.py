@@ -173,6 +173,18 @@ app = FastAPI(title="OutboundAI Dashboard", version="1.0.0")
 @app.on_event("startup")
 async def _startup():
     await init_default_user()
+    # Load all Supabase settings into os.environ so the agent worker sees them on startup
+    try:
+        from db import _adb
+        db = await _adb()
+        result = await db.table("settings").select("key, value").execute()
+        for row in (result.data or []):
+            k, v = row.get("key"), row.get("value")
+            if k and v is not None:
+                os.environ[k] = str(v)
+        logger.info("Loaded %d settings from Supabase into environment", len(result.data or []))
+    except Exception as exc:
+        logger.warning("Could not pre-load Supabase settings into env: %s", exc)
     if _scheduler:
         _scheduler.start()
         await _reschedule_all_campaigns()

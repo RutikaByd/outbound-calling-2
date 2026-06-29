@@ -34,6 +34,9 @@ DEFAULTS = {
     "TWILIO_SIP_USERNAME":     os.getenv("TWILIO_SIP_USERNAME", ""),
     "TWILIO_SIP_PASSWORD":     os.getenv("TWILIO_SIP_PASSWORD", ""),
     "ENABLE_AI_POST_PROCESSING": os.getenv("ENABLE_AI_POST_PROCESSING", "true"),
+    "VOICELINK_ENABLED":       os.getenv("VOICELINK_ENABLED", "false"),
+    "VOICELINK_TRUNK_ID":      os.getenv("VOICELINK_TRUNK_ID", ""),
+    "VOICELINK_DID_NUMBER":    os.getenv("VOICELINK_DID_NUMBER", ""),
 }
 
 
@@ -121,6 +124,7 @@ async def get_all_settings() -> dict:
         "S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY", "S3_ENDPOINT_URL", "S3_REGION", "S3_BUCKET",
         "CALCOM_API_KEY", "CALCOM_EVENT_TYPE_ID", "CALCOM_TIMEZONE",
         "ENABLED_TOOLS", "ENABLE_AI_POST_PROCESSING",
+        "VOICELINK_ENABLED", "VOICELINK_TRUNK_ID", "VOICELINK_DID_NUMBER",
     ]
     out: dict = {}
     for k in KNOWN_KEYS:

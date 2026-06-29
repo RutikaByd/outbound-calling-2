@@ -231,18 +231,36 @@ async def entrypoint(ctx: agents.JobContext) -> None:
 
     # ── Dial — MUST come before session.start() ──────────────────────────────
     if phone_number:
-        trunk_id = os.getenv("OUTBOUND_TRUNK_ID")
+        # ── Provider selection: VoiceLink or Vobiz ───────────────────────────
+        voicelink_enabled = (os.getenv("VOICELINK_ENABLED", "false").lower() in ("true", "1", "yes"))
+        voicelink_trunk   = os.getenv("VOICELINK_TRUNK_ID", "")
+        vobiz_trunk       = os.getenv("OUTBOUND_TRUNK_ID", "")
+
+        if voicelink_enabled and voicelink_trunk:
+            trunk_id = voicelink_trunk
+            provider = "VoiceLink"
+            # VoiceLink + LiveKit requires: tech-prefix (45454) + national digits, NO leading +
+            # E.g. +919028697049 → 45454919028697049
+            digits = phone_number.lstrip("+")
+            sip_call_to = f"45454{digits}"
+        else:
+            trunk_id = vobiz_trunk
+            provider = "Vobiz"
+            sip_call_to = phone_number  # Vobiz expects standard E.164 with +
+
         if not trunk_id:
-            await _log("error", "OUTBOUND_TRUNK_ID not set — cannot place outbound call")
+            setting_hint = "VOICELINK_TRUNK_ID" if voicelink_enabled else "OUTBOUND_TRUNK_ID"
+            await _log("error", f"{setting_hint} not set — cannot place outbound call")
             ctx.shutdown()
             return
-        await _log("info", f"Dialing {phone_number} via SIP trunk {trunk_id}")
+
+        await _log("info", f"Dialing {phone_number} via {provider} SIP trunk {trunk_id} (sip_call_to={sip_call_to})")
         try:
             await ctx.api.sip.create_sip_participant(
                 api.CreateSIPParticipantRequest(
                     room_name=ctx.room.name,
                     sip_trunk_id=trunk_id,
-                    sip_call_to=phone_number,
+                    sip_call_to=sip_call_to,
                     participant_identity=f"sip_{phone_number}",
                     wait_until_answered=True,
                 )

@@ -1346,6 +1346,51 @@
                     </form>
                 </div>
 
+                <!-- Group 3b: VoiceLink Telephony -->
+                <div class="card">
+                    <div class="card-header">
+                        <h2 class="card-title"><i data-lucide="link-2"></i>VoiceLink Telephony</h2>
+                        <span style="font-size:0.78rem;color:var(--text-secondary)">Alternative SIP provider — enable to route all calls through VoiceLink instead of Vobiz</span>
+                    </div>
+                    <form onsubmit="event.preventDefault(); saveSettingsGroup(['VOICELINK_ENABLED','VOICELINK_TRUNK_ID','VOICELINK_DID_NUMBER'],'set-vl-enabled','set-vl-trunk','set-vl-did')">
+                        <!-- Enable toggle -->
+                        <div class="form-group" style="display:flex;align-items:center;gap:1rem;padding:0.75rem 0;border-bottom:1px solid var(--border);margin-bottom:1rem;">
+                            <label class="toggle-switch" style="margin:0">
+                                <input type="checkbox" id="set-vl-enabled" value="true">
+                                <span class="toggle-slider"></span>
+                            </label>
+                            <div>
+                                <div style="font-weight:600;color:var(--text-primary)">Enable VoiceLink</div>
+                                <div style="font-size:0.8rem;color:var(--text-secondary)">When ON, all calls use VoiceLink SIP trunk. When OFF, Vobiz is used.</div>
+                            </div>
+                        </div>
+
+                        <div class="grid-2col">
+                            <div class="form-group">
+                                <label for="set-vl-trunk">LiveKit Trunk ID (VoiceLink)</label>
+                                <input type="text" id="set-vl-trunk" placeholder="ST_aRRsBKpRDtPw">
+                                <small style="color:var(--text-secondary);font-size:0.75rem;">The outbound SIP trunk ID in LiveKit that points to VoiceLink (160.30.71.89)</small>
+                            </div>
+                            <div class="form-group">
+                                <label for="set-vl-did">VoiceLink DID Number (Caller ID)</label>
+                                <input type="text" id="set-vl-did" placeholder="+919484959462">
+                                <small style="color:var(--text-secondary);font-size:0.75rem;">Your VoiceLink DID shown to recipients. E.164 format: +91XXXXXXXXXX</small>
+                            </div>
+                        </div>
+
+                        <div style="background:var(--bg-tertiary);border-radius:8px;padding:0.75rem 1rem;margin:0.5rem 0 1rem;border-left:3px solid var(--accent-blue);font-size:0.8rem;color:var(--text-secondary)">
+                            <strong style="color:var(--accent-blue)">How it works:</strong> VoiceLink requires a <code>45454</code> tech-prefix prepended to the destination number via the LiveKit SIP trunk.
+                            This is handled automatically — just provide your Trunk ID and DID above.
+                            <br><br>
+                            <strong>Your trunk info:</strong> SIP Server <code>160.30.71.89:3300</code> · Transport UDP · Tech Prefix <code>45454</code>
+                        </div>
+
+                        <button type="submit" class="btn btn-primary" style="width:100%">
+                            <i data-lucide="save"></i> Save VoiceLink Settings
+                        </button>
+                    </form>
+                </div>
+
                 <!-- Group 4: Cal.com Scheduling -->
                 <div class="card">
                     <div class="card-header"><h2 class="card-title"><i data-lucide="calendar"></i>Cal.com Booking Integration</h2></div>
@@ -2811,6 +2856,8 @@
                     "set-tw-phone": "TWILIO_OUTBOUND_NUMBER",
                     "set-tw-transfer": "DEFAULT_TRANSFER_NUMBER",
                     "set-outbound-trunk": "OUTBOUND_TRUNK_ID",
+                    "set-vl-trunk": "VOICELINK_TRUNK_ID",
+                    "set-vl-did": "VOICELINK_DID_NUMBER",
                     "set-cal-key": "CALCOM_API_KEY",
                     "set-cal-event": "CALCOM_EVENT_TYPE_ID",
                     "set-cal-tz": "CALCOM_TIMEZONE",
@@ -2834,6 +2881,13 @@
                             inputEl.placeholder = "[Configured in environment]";
                         }
                     }
+                }
+
+                // Handle VoiceLink toggle checkbox
+                const vlToggle = document.getElementById('set-vl-enabled');
+                if (vlToggle && config['VOICELINK_ENABLED']) {
+                    const val = (config['VOICELINK_ENABLED'].value || '').toLowerCase();
+                    vlToggle.checked = (val === 'true' || val === '1' || val === 'yes');
                 }
 
                 if (config["ENABLED_TOOLS"] && config["ENABLED_TOOLS"].value) {
@@ -2868,7 +2922,12 @@
             keys.forEach((key, idx) => {
                 const inputEl = document.getElementById(inputIds[idx]);
                 if (inputEl) {
-                    settings[key] = inputEl.value.trim();
+                    // Checkboxes store boolean as "true"/"false" string
+                    if (inputEl.type === 'checkbox') {
+                        settings[key] = inputEl.checked ? 'true' : 'false';
+                    } else {
+                        settings[key] = inputEl.value.trim();
+                    }
                 }
             });
 
