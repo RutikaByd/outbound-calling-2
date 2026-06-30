@@ -4,9 +4,13 @@ import logging
 import os
 import ssl
 import certifi
+from pathlib import Path
 from typing import Optional
 
+# Load .env FIRST — before any module-level imports that read env vars.
+# Use absolute path so this works no matter what directory Python is started from.
 from dotenv import load_dotenv
+load_dotenv(Path(__file__).parent / ".env", override=False)
 
 # Patch SSL before any network import — reused from existing LIvekitAIVoice project pattern
 _orig_ssl = ssl.create_default_context
@@ -29,11 +33,9 @@ from db import init_db, log_error, get_enabled_tools, get_setting
 from prompts import build_prompt
 from tools import AppointmentTools
 
-# load_dotenv without override — VPS env vars always win.
-# On a VPS the .env file won't exist — this is a no-op in production.
-load_dotenv(".env")
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("outbound-agent")
+
 
 SIP_DOMAIN = os.getenv("TWILIO_SIP_DOMAIN", "")
 

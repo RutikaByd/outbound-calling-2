@@ -16,7 +16,8 @@ import secrets
 import time
 
 from dotenv import load_dotenv
-load_dotenv(".env")
+from pathlib import Path as _Path
+load_dotenv(_Path(__file__).parent / ".env", override=False)
 
 from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse

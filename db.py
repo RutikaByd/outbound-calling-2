@@ -8,8 +8,20 @@ import os
 import time
 import uuid
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Optional
 from collections import defaultdict
+
+# ---------------------------------------------------------------------------
+# Bootstrap .env — use absolute path so this works regardless of CWD or
+# which process imports this module first.  override=False means real
+# environment variables (e.g. on a VPS) always win over .env values.
+# ---------------------------------------------------------------------------
+try:
+    from dotenv import load_dotenv as _load_dotenv
+    _load_dotenv(Path(__file__).parent / ".env", override=False)
+except Exception:
+    pass  # python-dotenv not installed; rely on system env vars
 
 # ---------------------------------------------------------------------------
 # DEFAULTS — loaded from environment variables or Supabase settings table.
